@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Shot Analysis</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div id="tooltip" class="tooltip"></div>
+    <div class="dashboard-container">
+        <header>
+            <h1>Shot Analysis</h1>
+        </header>
+
+        <div class="controls-panel">
+            <div class="control-item">
+                <button id="reset-btn">Reset to Halves</button>
+            </div>
+        </div>
+
+        <div class="legend-panel">
+            <div class="legend-group">
+                <h4>Heatmap Legend</h4>
+                <div class="legend-item">
+                    <span>Efficiency:</span>
+                    <div class="gradient-bar"></div>
+                    <div class="legend-labels">
+                        <span>Low</span>
+                        <span>High</span>
+                    </div>
+                </div>
+                <div class="legend-item">
+                    <span>Frequency:</span>
+                    <div class="size-circles">
+                        <div class="circle small"></div>
+                        <div class="circle medium"></div>
+                        <div class="circle large"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="legend-group">
+                <h4>Delta Legend</h4>
+                <div class="legend-item">
+                    <span>Freq Change:</span>
+                    <div class="arrow-legend">
+                        <span class="arrow-right">▲ Right side more</span>
+                        <span class="arrow-left">▼ Left side more</span>
+                    </div>
+                </div>
+                <div class="legend-item">
+                    <span>Eff Change:</span>
+                    <div class="arrow-colors">
+                        <span class="arrow-green">▲ Right side better</span>
+                        <span class="arrow-red">▲ Left side better</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <!-- Segment A -->
+            <div class="chart-panel" id="panel-a">
+                <div class="panel-header">
+                    <h3>Segment A</h3>
+                </div>
+                <div class="segment-controls">
+                    <details class="filter-dropdown" open>
+                        <summary>Filter</summary>
+                        <div class="filter-content">
+                            <div class="filter-row">
+                                <label>Season:</label>
+                                <select id="seasonSelectA"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Team:</label>
+                                <select id="teamSelectA"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Player:</label>
+                                <select id="playerSelectA"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Teammate On Court:</label>
+                                <select id="teammateOnA">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Teammate Off Court:</label>
+                                <select id="teammateOffA">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Opponent On Court:</label>
+                                <select id="opponentOnA">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Opponent Off Court:</label>
+                                <select id="opponentOffA">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                <div class="slider-row">
+                    <div class="period-buttons" data-segment="A">
+                        <button class="period-btn" data-range="0,12">Q1</button>
+                        <button class="period-btn" data-range="12,24">Q2</button>
+                        <button class="period-btn" data-range="24,36">Q3</button>
+                        <button class="period-btn" data-range="36,48">Q4</button>
+                        <button class="period-btn" data-range="0,24">1H</button>
+                        <button class="period-btn" data-range="24,48">2H</button>
+                        <button class="period-btn" data-range="0,48">Full</button>
+                    </div>
+                    <div id="slider-time-a"></div>
+                </div>
+                <div class="panel-content-grid">
+                    <div class="treemap-section">
+                        <div class="treemap-info" id="treemap-info-a">-- Select --</div>
+                        <div class="treemap-wrapper" id="treemap-a"></div>
+                    </div>
+                    <div class="court-section">
+                        <div class="tooltip"></div>
+                        <div class="heatmap-wrapper" id="heatmap-a"></div>
+                    </div>
+                </div>
+                <div class="stats-summary" id="stats-summary-a">
+                    <span class="overall-label">Overall</span>
+                    <span class="overall-value" id="overall-a">--</span>
+                </div>
+                <div class="stats-table-wrapper">
+                    <table class="stats-table" id="stats-table-a">
+                        <thead>
+                            <tr>
+                                <th>Shot Type</th>
+                                <th>Freq Bar</th>
+                                <th>Frequency</th>
+                                <th>FG/FGA</th>
+                                <th>FG%</th>
+                                <th>EFG%</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Delta -->
+            <div class="chart-panel" id="panel-delta">
+                <div class="panel-header">
+                    <h3>Right side shot more proportionally</h3>
+                </div>
+                <div class="panel-content centered-content">
+                    <div class="tooltip"></div>
+                    <div class="heatmap-wrapper" id="heatmap-delta-more"></div>
+                </div>
+
+                <div class="panel-header" style="border-top: 1px solid #333;">
+                    <h3>Right side shot less proportionally</h3>
+                </div>
+                <div class="panel-content centered-content">
+                    <div class="tooltip"></div>
+                    <div class="heatmap-wrapper" id="heatmap-delta-less"></div>
+                </div>
+            </div>
+            <!-- Segment B -->
+            <div class="chart-panel" id="panel-b">
+                <div class="panel-header">
+                    <h3>Segment B</h3>
+                </div>
+                <div class="segment-controls">
+                    <details class="filter-dropdown" open>
+                        <summary>Filter</summary>
+                        <div class="filter-content">
+                            <div class="filter-row">
+                                <label>Season:</label>
+                                <select id="seasonSelectB"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Team:</label>
+                                <select id="teamSelectB"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Player:</label>
+                                <select id="playerSelectB"></select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Teammate On Court:</label>
+                                <select id="teammateOnB">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Teammate Off Court:</label>
+                                <select id="teammateOffB">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Opponent On Court:</label>
+                                <select id="opponentOnB">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                            <div class="filter-row">
+                                <label>Opponent Off Court:</label>
+                                <select id="opponentOffB">
+                                    <option value="">-- Any --</option>
+                                </select>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                <div class="slider-row">
+                    <div class="period-buttons" data-segment="B">
+                        <button class="period-btn" data-range="0,12">Q1</button>
+                        <button class="period-btn" data-range="12,24">Q2</button>
+                        <button class="period-btn" data-range="24,36">Q3</button>
+                        <button class="period-btn" data-range="36,48">Q4</button>
+                        <button class="period-btn" data-range="0,24">1H</button>
+                        <button class="period-btn" data-range="24,48">2H</button>
+                        <button class="period-btn" data-range="0,48">Full</button>
+                    </div>
+                    <div id="slider-time-b"></div>
+                </div>
+                <div class="panel-content-grid">
+                    <div class="treemap-section">
+                        <div class="treemap-info" id="treemap-info-b">-- Select --</div>
+                        <div class="treemap-wrapper" id="treemap-b"></div>
+                    </div>
+                    <div class="court-section">
+                        <div class="tooltip"></div>
+                        <div class="heatmap-wrapper" id="heatmap-b"></div>
+                    </div>
+                </div>
+                <div class="stats-summary" id="stats-summary-b">
+                    <span class="overall-label">Overall</span>
+                    <span class="overall-value" id="overall-b">--</span>
+                </div>
+                <div class="stats-table-wrapper">
+                    <table class="stats-table" id="stats-table-b">
+                        <thead>
+                            <tr>
+                                <th>Shot Type</th>
+                                <th>Freq Bar</th>
+                                <th>Frequency</th>
+                                <th>FG/FGA</th>
+                                <th>FG%</th>
+                                <th>EFG%</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-hexbin.v0.2.min.js"></script>
+    <script src="https://unpkg.com/d3-simple-slider"></script>
+    <script src="main.js"></script>
+</body>
+
+</html>

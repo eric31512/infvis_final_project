@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+fetch_log.txt
+
+# Large data files
+data/
+*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
