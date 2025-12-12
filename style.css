@@ -278,6 +278,61 @@ button#reset-btn:hover {
     overflow: hidden;
 }
 
+/* Treemap Transition Animations */
+.treemap-wrapper svg {
+    transition: opacity 0.3s ease;
+}
+
+.treemap-wrapper .cell rect,
+.treemap-wrapper .category rect {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.treemap-wrapper .cell text,
+.treemap-wrapper .category text {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.treemap-wrapper .back-btn {
+    animation: fadeSlideDown 0.4s ease-out;
+}
+
+.treemap-wrapper .cell {
+    animation: zoomIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes zoomIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes fadeSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Court map transition for category filter */
+.heatmap-wrapper svg .heatmap,
+.heatmap-wrapper svg .highlight-layer {
+    transition: opacity 0.3s ease;
+}
+
+.heatmap-wrapper svg .shot-zone {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .court-section {
     flex: 1;
     display: flex;

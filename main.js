@@ -62,9 +62,48 @@ const dataCache = {};
 
 // State for each segment
 const segmentState = {
-    A: { shots: [], players: new Map(), teammates: new Map(), opponents: new Map(), filteredShots: [] },
-    B: { shots: [], players: new Map(), teammates: new Map(), opponents: new Map(), filteredShots: [] }
+    A: { shots: [], players: new Map(), teammates: new Map(), opponents: new Map(), filteredShots: [], selectedCategory: null, categoryPositions: {} },
+    B: { shots: [], players: new Map(), teammates: new Map(), opponents: new Map(), filteredShots: [], selectedCategory: null, categoryPositions: {} }
 };
+
+// Select a category in treemap - filters court map and zooms treemap
+function selectCategory(segment, categoryName) {
+    const state = segmentState[segment];
+
+    // Toggle: if same category clicked, deselect
+    if (state.selectedCategory === categoryName) {
+        state.selectedCategory = null;
+    } else {
+        state.selectedCategory = categoryName;
+    }
+
+    const containerId = `#treemap-${segment.toLowerCase()}`;
+
+    // Animate treemap zoom (in-place, no redraw)
+    drawTreemapWithSelection(containerId, state.filteredShots, segment, state.selectedCategory);
+
+    // Update court map with filtered data
+    const rangeSlider = segment === 'A' ? sliderA : sliderB;
+    const timeRange = rangeSlider ? rangeSlider.value() : (segment === 'A' ? [0, 24] : [24, 48]);
+
+    if (state.selectedCategory) {
+        // Filter shots by category
+        const categoryShots = state.filteredShots.filter(d =>
+            getShotCategory(d.ACTION_TYPE) === state.selectedCategory
+        );
+        drawHeatmap(`#heatmap-${segment.toLowerCase()}`, categoryShots, timeRange, segment);
+        updateOverallStats(segment, categoryShots);
+        updateStatsTable(segment, categoryShots);
+    } else {
+        // Show all shots
+        drawHeatmap(`#heatmap-${segment.toLowerCase()}`, state.filteredShots, timeRange, segment);
+        updateOverallStats(segment, state.filteredShots);
+        updateStatsTable(segment, state.filteredShots);
+    }
+
+    // Update delta
+    updateDelta();
+}
 
 let sliderA = null;
 let sliderB = null;
@@ -250,17 +289,22 @@ function drawHeatmap(containerId, data, timeRange, segment) {
 
     const group = svg.append("g").attr("class", "heatmap");
 
-    // Draw circles first (visual layer)
+    // Draw circles first (visual layer) with animation
     group.selectAll("circle.shot-zone")
         .data(binned)
         .enter().append("circle")
         .attr("class", "shot-zone")
         .attr("cx", d => d.x)
         .attr("cy", d => d.y)
-        .attr("r", d => sizeScale(d.freq))
+        .attr("r", 0) // Start with 0 radius for animation
         .attr("fill", d => heatmapColorScale(d.eff))
-        .attr("opacity", 0.8)
-        .attr("pointer-events", "none");
+        .attr("opacity", 0)
+        .attr("pointer-events", "none")
+        .transition()
+        .duration(400)
+        .delay((d, i) => i * 5) // Staggered animation
+        .attr("r", d => sizeScale(d.freq))
+        .attr("opacity", 0.8);
 
     // Generate all possible cells
     const numCols = Math.ceil(courtWidth / binSize);
@@ -647,6 +691,23 @@ function drawTreemap(containerId, data, segment) {
         .attr("height", d => Math.max(0, d.y1 - d.y0))
         .attr("fill", "none");
 
+    // Save category positions for zoom animation
+    if (segment) {
+        segmentState[segment].categoryPositions = {};
+        (root.children || []).forEach(catNode => {
+            segmentState[segment].categoryPositions[catNode.data.name] = {
+                x0: catNode.x0,
+                y0: catNode.y0,
+                x1: catNode.x1,
+                y1: catNode.y1,
+                cx: (catNode.x0 + catNode.x1) / 2,
+                cy: (catNode.y0 + catNode.y1) / 2,
+                width: catNode.x1 - catNode.x0,
+                height: catNode.y1 - catNode.y0
+            };
+        });
+    }
+
     // Category label with linked highlighting
     categories.append("text")
         .attr("x", d => d.x0 + 3)
@@ -734,6 +795,332 @@ function drawTreemap(containerId, data, segment) {
         d3.select("#tooltip").style("opacity", 0);
         if (segment) clearHighlight(segment);
     });
+
+    // Click on category label to drill down
+    categories.select("text")
+        .on("click", (event, d) => {
+            event.stopPropagation();
+            if (segment) selectCategory(segment, d.data.name);
+        });
+
+    // Click on cells to drill down to parent category
+    cells.on("click", (event, d) => {
+        event.stopPropagation();
+        const parentName = d.parent ? d.parent.data.name : null;
+        if (segment && parentName) selectCategory(segment, parentName);
+    });
+}
+
+// Amcharts-style smooth zoom treemap with recalculated layout on drill-down
+function drawTreemapWithSelection(containerId, data, segment, selectedCategory) {
+    const container = d3.select(containerId);
+    const width = 280;
+    const height = 280;
+    const duration = 600; // Slightly longer for smoother feel
+    const headerHeight = 24;
+
+    const hierarchicalData = aggregateShotTypesHierarchical(data);
+    if (hierarchicalData.length === 0) return;
+
+    // Always clear and redraw for clean state
+    container.selectAll("*").remove();
+
+    const svg = container.append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .style("overflow", "hidden");
+
+    // Build full treemap layout (for reference positions)
+    const fullRoot = d3.hierarchy({ name: "root", children: hierarchicalData })
+        .sum(d => d.children ? 0 : d.attempts || 0);
+
+    d3.treemap()
+        .size([width, height])
+        .paddingTop(14)
+        .paddingRight(1)
+        .paddingBottom(1)
+        .paddingLeft(1)
+        .paddingInner(2)(fullRoot);
+
+    const categoryNodes = fullRoot.children || [];
+
+    // Store positions for reference
+    if (segment && segmentState[segment]) {
+        segmentState[segment].categoryPositions = {};
+        categoryNodes.forEach(cat => {
+            segmentState[segment].categoryPositions[cat.data.name] = {
+                x0: cat.x0, y0: cat.y0, x1: cat.x1, y1: cat.y1
+            };
+        });
+    }
+
+    if (selectedCategory) {
+        // === DRILL-DOWN VIEW ===
+        const selectedCatData = hierarchicalData.find(c => c.name === selectedCategory);
+        if (!selectedCatData || !selectedCatData.children) return;
+
+        // Add breadcrumb header first
+        const header = svg.append("g").attr("class", "breadcrumb");
+
+        header.append("rect")
+            .attr("x", 0).attr("y", 0)
+            .attr("width", width).attr("height", headerHeight)
+            .attr("fill", "#FFC857")
+            .attr("rx", 3);
+
+        header.append("text")
+            .attr("x", 8).attr("y", 16)
+            .attr("font-size", "12px")
+            .attr("font-weight", "bold")
+            .attr("fill", "#111")
+            .text(`← ${selectedCategory}`);
+
+        header.attr("cursor", "pointer")
+            .on("click", () => selectCategory(segment, selectedCategory));
+
+        // Build NEW treemap layout for children only, filling the remaining space
+        const childRoot = d3.hierarchy({ name: selectedCategory, children: selectedCatData.children })
+            .sum(d => d.attempts || 0);
+
+        d3.treemap()
+            .size([width, height - headerHeight])
+            .paddingOuter(2)
+            .paddingInner(2)(childRoot);
+
+        const childLeaves = childRoot.leaves();
+
+        // Find original positions from full layout
+        const selectedCatNode = categoryNodes.find(c => c.data.name === selectedCategory);
+        const origLeaves = selectedCatNode ? selectedCatNode.leaves() : [];
+        const origPosMap = new Map();
+        origLeaves.forEach(leaf => {
+            origPosMap.set(leaf.data.name, { x0: leaf.x0, y0: leaf.y0, x1: leaf.x1, y1: leaf.y1 });
+        });
+
+        // Draw cells with animation from original position to new position
+        const cellsGroup = svg.append("g")
+            .attr("class", "cells")
+            .attr("transform", `translate(0, ${headerHeight})`);
+
+        childLeaves.forEach(leaf => {
+            const newX = leaf.x0;
+            const newY = leaf.y0;
+            const newW = leaf.x1 - leaf.x0;
+            const newH = leaf.y1 - leaf.y0;
+
+            // Get original position (relative to category origin)
+            const orig = origPosMap.get(leaf.data.name);
+            let startX = newX, startY = newY, startW = newW * 0.3, startH = newH * 0.3;
+            if (orig && selectedCatNode) {
+                // Calculate relative position within category, then scale
+                const catX0 = selectedCatNode.x0;
+                const catY0 = selectedCatNode.y0;
+                const catW = selectedCatNode.x1 - selectedCatNode.x0;
+                const catH = selectedCatNode.y1 - selectedCatNode.y0;
+
+                // Start from scaled-down original position
+                startX = ((orig.x0 - catX0) / catW) * width;
+                startY = ((orig.y0 - catY0) / catH) * (height - headerHeight);
+                startW = ((orig.x1 - orig.x0) / catW) * width;
+                startH = ((orig.y1 - orig.y0) / catH) * (height - headerHeight);
+            }
+
+            const cellGroup = cellsGroup.append("g")
+                .attr("class", "cell")
+                .attr("transform", `translate(${startX}, ${startY})`);
+
+            const rect = cellGroup.append("rect")
+                .attr("width", startW)
+                .attr("height", startH)
+                .attr("fill", treemapColorScale(leaf.data.efg || 0))
+                .attr("stroke", "#222")
+                .attr("stroke-width", 0.5)
+                .attr("opacity", 0.3);
+
+            // Animate to final position
+            cellGroup.transition()
+                .duration(duration)
+                .ease(d3.easeCubicOut)
+                .attr("transform", `translate(${newX}, ${newY})`);
+
+            rect.transition()
+                .duration(duration)
+                .ease(d3.easeCubicOut)
+                .attr("width", newW)
+                .attr("height", newH)
+                .attr("opacity", 1);
+
+            // Add labels after animation
+            setTimeout(() => {
+                if (newW > 35 && newH > 22) {
+                    const shortName = leaf.data.name
+                        .replace(' Shot', '').replace('Driving ', '')
+                        .replace(' Jump', '').replace('Running ', '')
+                        .substring(0, Math.floor(newW / 5.5));
+
+                    cellGroup.append("text")
+                        .attr("x", 3).attr("y", 12)
+                        .attr("font-size", "9px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#000")
+                        .attr("opacity", 0)
+                        .text(shortName)
+                        .transition()
+                        .duration(200)
+                        .attr("opacity", 1);
+
+                    if (newH > 35) {
+                        cellGroup.append("text")
+                            .attr("x", 3).attr("y", 24)
+                            .attr("font-size", "8px")
+                            .attr("fill", "#000")
+                            .attr("opacity", 0)
+                            .text(`${(leaf.data.efg * 100).toFixed(0)}% EFG`)
+                            .transition()
+                            .duration(200)
+                            .attr("opacity", 1);
+                    }
+
+                    if (newH > 48) {
+                        cellGroup.append("text")
+                            .attr("x", 3).attr("y", 36)
+                            .attr("font-size", "8px")
+                            .attr("fill", "#333")
+                            .attr("opacity", 0)
+                            .text(`${leaf.data.made}/${leaf.data.attempts}`)
+                            .transition()
+                            .duration(200)
+                            .attr("opacity", 1);
+                    }
+                }
+            }, duration * 0.7);
+
+            // Tooltip and highlighting
+            cellGroup
+                .attr("cursor", "pointer")
+                .on("mouseover", (event) => {
+                    rect.attr("stroke", "#FFC857").attr("stroke-width", 2);
+                    d3.select("#tooltip").style("opacity", 1)
+                        .html(`<div style="font-weight:bold; color:#FFC857;">${leaf.data.name}</div>
+                            <span style="color:#aaa;">${selectedCategory}</span><br>
+                            ${leaf.data.made}/${leaf.data.attempts} (${(leaf.data.fg * 100).toFixed(1)}%)<br>
+                            EFG: ${(leaf.data.efg * 100).toFixed(1)}%`)
+                        .style("left", (event.pageX + 15) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                    if (segment) highlightShotType(segment, leaf.data.name);
+                })
+                .on("mouseout", () => {
+                    rect.attr("stroke", "#222").attr("stroke-width", 0.5);
+                    d3.select("#tooltip").style("opacity", 0);
+                    if (segment) clearHighlight(segment);
+                });
+        });
+
+    } else {
+        // === OVERVIEW (ALL CATEGORIES) ===
+        const baseGroup = svg.append("g").attr("class", "treemap-base");
+
+        categoryNodes.forEach(catNode => {
+            const catWidth = catNode.x1 - catNode.x0;
+            const catHeight = catNode.y1 - catNode.y0;
+
+            const catGroup = baseGroup.append("g")
+                .attr("class", "category")
+                .attr("data-name", catNode.data.name)
+                .attr("cursor", "pointer")
+                .on("click", () => selectCategory(segment, catNode.data.name));
+
+            // Category background
+            catGroup.append("rect")
+                .attr("class", "cat-bg")
+                .attr("x", catNode.x0)
+                .attr("y", catNode.y0)
+                .attr("width", catWidth)
+                .attr("height", catHeight)
+                .attr("fill", "rgba(30,30,30,0.5)")
+                .attr("stroke", "#444")
+                .attr("stroke-width", 1);
+
+            // Category label
+            catGroup.append("text")
+                .attr("class", "cat-label")
+                .attr("x", catNode.x0 + 4)
+                .attr("y", catNode.y0 + 11)
+                .attr("fill", "#fff")
+                .attr("font-size", "10px")
+                .attr("font-weight", "bold")
+                .text(catNode.data.name);
+
+            // Draw cells with entrance animation
+            catNode.leaves().forEach((leaf, i) => {
+                const cellWidth = leaf.x1 - leaf.x0;
+                const cellHeight = leaf.y1 - leaf.y0;
+
+                const cellGroup = catGroup.append("g")
+                    .attr("class", "cell")
+                    .attr("transform", `translate(${leaf.x0},${leaf.y0})`);
+
+                cellGroup.append("rect")
+                    .attr("width", 0)
+                    .attr("height", 0)
+                    .attr("fill", treemapColorScale(leaf.data.efg || 0))
+                    .attr("stroke", "#222")
+                    .attr("stroke-width", 0.5)
+                    .transition()
+                    .duration(400)
+                    .delay(i * 15)
+                    .ease(d3.easeCubicOut)
+                    .attr("width", cellWidth)
+                    .attr("height", cellHeight);
+
+                if (cellWidth > 25 && cellHeight > 18) {
+                    const shortName = leaf.data.name
+                        .replace(' Shot', '').replace('Driving ', '')
+                        .replace(' Jump', '').replace('Running ', '')
+                        .substring(0, Math.floor(cellWidth / 5));
+
+                    cellGroup.append("text")
+                        .attr("x", 2).attr("y", 10)
+                        .attr("font-size", "7px")
+                        .attr("font-weight", "bold")
+                        .attr("fill", "#000")
+                        .attr("opacity", 0)
+                        .transition()
+                        .delay(300 + i * 15)
+                        .attr("opacity", 1)
+                        .text(shortName);
+
+                    if (cellHeight > 28) {
+                        cellGroup.append("text")
+                            .attr("x", 2).attr("y", 19)
+                            .attr("font-size", "6px")
+                            .attr("fill", "#000")
+                            .attr("opacity", 0)
+                            .transition()
+                            .delay(300 + i * 15)
+                            .attr("opacity", 1)
+                            .text(`${(leaf.data.efg * 100).toFixed(0)}%`);
+                    }
+                }
+
+                cellGroup
+                    .on("mouseover", (event) => {
+                        d3.select("#tooltip").style("opacity", 1)
+                            .html(`<div style="font-weight:bold; color:#FFC857;">${leaf.data.name}</div>
+                                <span style="color:#aaa;">${catNode.data.name}</span><br>
+                                ${leaf.data.made}/${leaf.data.attempts} (${(leaf.data.fg * 100).toFixed(1)}%)<br>
+                                EFG: ${(leaf.data.efg * 100).toFixed(1)}%`)
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 28) + "px");
+                        if (segment) highlightShotType(segment, leaf.data.name);
+                    })
+                    .on("mouseout", () => {
+                        d3.select("#tooltip").style("opacity", 0);
+                        if (segment) clearHighlight(segment);
+                    });
+            });
+        });
+    }
 }
 
 // Update overall stats summary
@@ -823,6 +1210,7 @@ async function updateSegmentA() {
         d3.select("#opponentOffA").property("value"));
 
     segmentState.A.filteredShots = filtered;
+    segmentState.A.selectedCategory = null; // Reset category selection when data changes
 
     drawHeatmap("#heatmap-a", filtered, rangeA, 'A');
     drawTreemap("#treemap-a", filtered, 'A');
@@ -848,6 +1236,7 @@ async function updateSegmentB() {
         d3.select("#opponentOffB").property("value"));
 
     segmentState.B.filteredShots = filtered;
+    segmentState.B.selectedCategory = null; // Reset category selection when data changes
 
     drawHeatmap("#heatmap-b", filtered, rangeB, 'B');
     drawTreemap("#treemap-b", filtered, 'B');
@@ -885,7 +1274,18 @@ async function updateDelta() {
         d3.select("#opponentOnB").property("value"),
         d3.select("#opponentOffB").property("value"));
 
-    drawDelta("#heatmap-delta-more", "#heatmap-delta-less", filteredA, filteredB, rangeA, rangeB);
+    // Apply category filter if selected
+    let deltaA = filteredA;
+    let deltaB = filteredB;
+
+    if (segmentState.A.selectedCategory) {
+        deltaA = filteredA.filter(d => getShotCategory(d.ACTION_TYPE) === segmentState.A.selectedCategory);
+    }
+    if (segmentState.B.selectedCategory) {
+        deltaB = filteredB.filter(d => getShotCategory(d.ACTION_TYPE) === segmentState.B.selectedCategory);
+    }
+
+    drawDelta("#heatmap-delta-more", "#heatmap-delta-less", deltaA, deltaB, rangeA, rangeB);
 }
 
 // Handle team change (load team data, populate players)
