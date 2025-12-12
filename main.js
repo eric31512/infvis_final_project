@@ -67,41 +67,40 @@ const segmentState = {
 };
 
 // Select a category in treemap - filters court map and zooms treemap
+// 修改後的 selectCategory：分離 Treemap 與 Heatmap 的更新邏輯
 function selectCategory(segment, categoryName) {
     const state = segmentState[segment];
 
-    // Toggle: if same category clicked, deselect
+    // 1. 切換選取狀態
     if (state.selectedCategory === categoryName) {
-        state.selectedCategory = null;
+        state.selectedCategory = null; // 取消選取 (Back to Overview)
     } else {
-        state.selectedCategory = categoryName;
+        state.selectedCategory = categoryName; // 選取並鑽取 (Drill down)
     }
 
-    const containerId = `#treemap-${segment.toLowerCase()}`;
+    // 2. 針對 Treemap：呼叫 "Zoom" (平滑縮放)，而不是 "Draw" (重畫)
+    zoomTreemap(segment, state.selectedCategory);
 
-    // Animate treemap zoom (in-place, no redraw)
-    drawTreemapWithSelection(containerId, state.filteredShots, segment, state.selectedCategory);
-
-    // Update court map with filtered data
+    // 3. 針對 Heatmap：維持 "Draw" (重畫)，因為點位需要重新過濾
     const rangeSlider = segment === 'A' ? sliderA : sliderB;
     const timeRange = rangeSlider ? rangeSlider.value() : (segment === 'A' ? [0, 24] : [24, 48]);
 
+    let displayShots = state.filteredShots;
     if (state.selectedCategory) {
-        // Filter shots by category
-        const categoryShots = state.filteredShots.filter(d =>
+        // 如果有選取類別，Heatmap 只顯示該類別的投籃點
+        displayShots = state.filteredShots.filter(d =>
             getShotCategory(d.ACTION_TYPE) === state.selectedCategory
         );
-        drawHeatmap(`#heatmap-${segment.toLowerCase()}`, categoryShots, timeRange, segment);
-        updateOverallStats(segment, categoryShots);
-        updateStatsTable(segment, categoryShots);
-    } else {
-        // Show all shots
-        drawHeatmap(`#heatmap-${segment.toLowerCase()}`, state.filteredShots, timeRange, segment);
-        updateOverallStats(segment, state.filteredShots);
-        updateStatsTable(segment, state.filteredShots);
     }
 
-    // Update delta
+    // 重繪球場圖
+    drawHeatmap(`#heatmap-${segment.toLowerCase()}`, displayShots, timeRange, segment);
+
+    // 更新數據面板
+    updateOverallStats(segment, displayShots);
+    updateStatsTable(segment, displayShots);
+
+    // 更新 Delta 圖
     updateDelta();
 }
 
@@ -809,6 +808,102 @@ function drawTreemap(containerId, data, segment) {
         const parentName = d.parent ? d.parent.data.name : null;
         if (segment && parentName) selectCategory(segment, parentName);
     });
+}
+
+// 新增：只負責縮放 Treemap 的函式 (不重畫 DOM)
+function zoomTreemap(segment, selectedCategory) {
+    const containerId = `#treemap-${segment.toLowerCase()}`;
+    const svg = d3.select(containerId).select("svg");
+
+    // 固定的畫布大小 (與 drawTreemap 中設定的一致)
+    const width = 280;
+    const height = 280;
+
+    // 1. 決定新的座標系統 (Domain)
+    // 預設為全域 (0 ~ 280)
+    let xDomain = [0, width];
+    let yDomain = [0, height];
+
+    // 如果有選取類別，則將 Domain 聚焦在該類別的原始範圍
+    if (selectedCategory) {
+        const pos = segmentState[segment].categoryPositions[selectedCategory];
+        if (pos) {
+            xDomain = [pos.x0, pos.x1];
+            yDomain = [pos.y0, pos.y1];
+        }
+    }
+
+    // 2. 建立新的比例尺
+    const x = d3.scaleLinear().domain(xDomain).range([0, width]);
+    const y = d3.scaleLinear().domain(yDomain).range([0, height]);
+
+    // 3. 定義過渡動畫
+    const t = svg.transition().duration(250).ease(d3.easeCubicOut);
+
+    // --- 更新所有 Cell (子矩形) ---
+    // 我們需要同時更新 group 的位置、內部的 rect 大小、以及 clipPath
+
+    const cells = svg.selectAll("g.cell");
+
+    // A. 移動 Group 位置
+    cells.transition(t)
+        .attr("transform", d => `translate(${x(d.x0)},${y(d.y0)})`);
+
+    // B. 調整 Rect 大小
+    cells.select("rect")
+        .transition(t)
+        .attr("width", d => Math.max(0, x(d.x1) - x(d.x0)))
+        .attr("height", d => Math.max(0, y(d.y1) - y(d.y0)));
+
+    // C. 調整 ClipPath (文字裁切範圍)，否則放大後文字還是會被原本的小框框切掉
+    cells.select("clipPath rect")
+        .transition(t)
+        .attr("width", d => Math.max(0, x(d.x1) - x(d.x0) - 2))
+        .attr("height", d => Math.max(0, y(d.y1) - y(d.y0) - 2));
+
+    // D. 控制文字顯示/隱藏
+    // 當矩形放大後，原本因為太小而隱藏的文字現在可以顯示了
+    cells.each(function (d) {
+        const cellWidth = x(d.x1) - x(d.x0);
+        const cellHeight = y(d.y1) - y(d.y0);
+        const g = d3.select(this);
+
+        // 簡單的顯示邏輯：夠大就顯示
+        const showText = cellWidth > 30 && cellHeight > 20;
+        const showPercent = showText && cellHeight > 30;
+
+        // 標題
+        g.select("text").filter((d, i, nodes) => i === 0) // 假設第一個 text 是標題
+            .transition(t)
+            .attr("opacity", showText ? 1 : 0);
+
+        // 百分比 (如果有第二個 text)
+        g.selectAll("text").filter((d, i) => i > 0)
+            .transition(t)
+            .attr("opacity", showPercent ? 1 : 0);
+    });
+
+    // --- 更新 Category (大類別背景與標籤) ---
+    const categories = svg.selectAll("g.category");
+
+    // 更新大類別框線/背景
+    categories.select("rect")
+        .transition(t)
+        .attr("x", d => x(d.x0))
+        .attr("y", d => y(d.y0))
+        .attr("width", d => Math.max(0, x(d.x1) - x(d.x0)))
+        .attr("height", d => Math.max(0, y(d.y1) - y(d.y0)));
+
+    // 更新大類別標籤位置
+    categories.select("text")
+        .transition(t)
+        .attr("x", d => x(d.x0) + 3)
+        .attr("y", d => y(d.y0) + 11)
+        .attr("opacity", d => {
+            // 如果選取了某個類別，我們通常希望隱藏所有大標籤，或者只顯示當前的
+            // 這裡做一個簡單處理：如果有選取 (Drill-down)，淡出所有大標籤，讓視角專注在子項目
+            return selectedCategory ? 0 : 1;
+        });
 }
 
 // Amcharts-style smooth zoom treemap with recalculated layout on drill-down
