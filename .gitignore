@@ -12,9 +12,7 @@ __pycache__/
 *.log
 fetch_log.txt
 
-# Large data files
-data/
-*.json
+# Large data files (now tracked for GitHub Pages)
 
 # OS
 .DS_Store
