@@ -664,6 +664,33 @@ function drawTreemap(containerId, data, segment) {
         .attr("width", width)
         .attr("height", height);
 
+    // Breadcrumb header (hidden by default, shown on drill-down)
+    const breadcrumb = svg.append("g")
+        .attr("class", "breadcrumb")
+        .attr("opacity", 0);
+
+    breadcrumb.append("rect")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", width)
+        .attr("height", 20)
+        .attr("fill", "#FFC857")
+        .attr("rx", 3);
+
+    breadcrumb.append("text")
+        .attr("class", "breadcrumb-text")
+        .attr("x", 8)
+        .attr("y", 14)
+        .attr("font-size", "11px")
+        .attr("font-weight", "bold")
+        .attr("fill", "#111")
+        .text("");
+
+    breadcrumb.attr("cursor", "pointer")
+        .on("click", () => {
+            if (segment) selectCategory(segment, segmentState[segment].selectedCategory);
+        });
+
     // Create hierarchy data with categories
     const root = d3.hierarchy({ name: "root", children: hierarchicalData })
         .sum(d => d.children ? 0 : d.attempts || 0);
@@ -838,7 +865,16 @@ function zoomTreemap(segment, selectedCategory) {
     const y = d3.scaleLinear().domain(yDomain).range([0, height]);
 
     // 3. 定義過渡動畫
-    const t = svg.transition().duration(250).ease(d3.easeCubicOut);
+    const t = svg.transition().duration(100).ease(d3.easeCubicOut);
+
+    // --- 更新 Breadcrumb ---
+    const breadcrumb = svg.select("g.breadcrumb");
+    if (selectedCategory) {
+        breadcrumb.select(".breadcrumb-text").text(`← ${selectedCategory}`);
+        breadcrumb.transition(t).attr("opacity", 1);
+    } else {
+        breadcrumb.transition(t).attr("opacity", 0);
+    }
 
     // --- 更新所有 Cell (子矩形) ---
     // 我們需要同時更新 group 的位置、內部的 rect 大小、以及 clipPath

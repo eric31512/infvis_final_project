@@ -211,7 +211,7 @@ button#reset-btn:hover {
 }
 
 #panel-delta {
-    flex: 0.8;
+    flex: 0.7;
     /* Smaller delta panel */
 }
 
@@ -306,6 +306,7 @@ button#reset-btn:hover {
         opacity: 0;
         transform: scale(0.8);
     }
+
     to {
         opacity: 1;
         transform: scale(1);
@@ -317,6 +318,7 @@ button#reset-btn:hover {
         opacity: 0;
         transform: translateY(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
