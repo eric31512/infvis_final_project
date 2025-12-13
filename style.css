@@ -71,7 +71,7 @@ select {
     cursor: pointer;
 }
 
-button#reset-btn {
+button#info-btn {
     padding: 8px 20px;
     background-color: #FFC857;
     color: #111;
@@ -83,8 +83,122 @@ button#reset-btn {
     font-size: 1rem;
 }
 
-button#reset-btn:hover {
+button#info-btn:hover {
     background-color: #ffd680;
+}
+
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.3s ease;
+}
+
+.modal.show {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.modal-content {
+    background-color: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 700px;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+    animation: slideUp 0.3s ease;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-close {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 28px;
+    color: #888;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.modal-close:hover {
+    color: #FFC857;
+}
+
+.modal-content h2 {
+    color: #FFC857;
+    margin-bottom: 25px;
+    font-size: 1.8rem;
+    text-align: center;
+}
+
+.intro-section {
+    margin-bottom: 25px;
+}
+
+.intro-section h3 {
+    color: #FFC857;
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+}
+
+.intro-section p {
+    color: #ccc;
+    line-height: 1.7;
+}
+
+.intro-section ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.intro-section li {
+    color: #ccc;
+    margin-bottom: 8px;
+    padding-left: 20px;
+    position: relative;
+}
+
+.intro-section li::before {
+    content: "•";
+    color: #FFC857;
+    position: absolute;
+    left: 0;
+}
+
+.intro-section li strong {
+    color: #fff;
 }
 
 /* Legend Panel */

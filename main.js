@@ -1923,18 +1923,31 @@ d3.xml("court.svg").then(function (xml) {
         });
     });
 
-    d3.select("#reset-btn").on("click", () => {
-        sliderA.value([0, 24]);
-        sliderB.value([24, 48]);
+    // Info modal handlers
+    const modal = document.getElementById("intro-modal");
+    const infoBtn = document.getElementById("info-btn");
+    const closeBtn = document.querySelector(".modal-close");
 
-        // Update active states for period buttons
-        d3.selectAll('.period-buttons[data-segment="A"] .period-btn').classed('active', false);
-        d3.select('.period-buttons[data-segment="A"] .period-btn[data-range="0,24"]').classed('active', true);
-        d3.selectAll('.period-buttons[data-segment="B"] .period-btn').classed('active', false);
-        d3.select('.period-buttons[data-segment="B"] .period-btn[data-range="24,48"]').classed('active', true);
+    infoBtn.addEventListener("click", () => {
+        modal.classList.add("show");
+    });
 
-        updateSegmentA();
-        updateSegmentB();
+    closeBtn.addEventListener("click", () => {
+        modal.classList.remove("show");
+    });
+
+    // Close modal when clicking outside content
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+            modal.classList.remove("show");
+        }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.classList.contains("show")) {
+            modal.classList.remove("show");
+        }
     });
 
     // Initial load

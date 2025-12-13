@@ -18,7 +18,53 @@
 
         <div class="controls-panel">
             <div class="control-item">
-                <button id="reset-btn">Reset to Halves</button>
+                <button id="info-btn">About</button>
+            </div>
+        </div>
+
+        <!-- Introduction Modal -->
+        <div id="intro-modal" class="modal">
+            <div class="modal-content">
+                <span class="modal-close">&times;</span>
+                <h2>NBA 投籃分析儀表板</h2>
+
+                <div class="intro-section">
+                    <h3>概述</h3>
+                    <p>這是一個互動式儀表板，讓您可以分析和比較 NBA 球員的投籃模式。
+                        選擇兩個不同的情境（選擇 A 和 B）來比較不同條件下的投籃表現，
+                        例如不同時段、隊友組合及對手陣容。</p>
+                </div>
+
+                <div class="intro-section">
+                    <h3>功能特色</h3>
+                    <ul>
+                        <li><strong>賽季與球隊選擇：</strong>選擇特定球隊或分析全聯盟數據</li>
+                        <li><strong>球員選擇：</strong>分析個別球員或整隊表現</li>
+                        <li><strong>時間範圍：</strong>依比賽節次篩選（Q1-Q4、上下半場或自訂）</li>
+                        <li><strong>陣容篩選：</strong>依隊友或對手的在場/不在場狀態篩選</li>
+                        <li><strong>對手球隊：</strong>分析對特定對手的表現</li>
+                    </ul>
+                </div>
+
+                <div class="intro-section">
+                    <h3>視覺化圖表</h3>
+                    <ul>
+                        <li><strong>樹狀圖 (Treemap)：</strong>投籃類型分佈 - 點擊可深入查看各類別</li>
+                        <li><strong>球場熱區圖：</strong>投籃位置頻率（大小）與效率（顏色）</li>
+                        <li><strong>差異比較圖 (Delta)：</strong>比較選擇 A 與 B 的頻率差異</li>
+                        <li><strong>數據統計表：</strong>詳細的投籃類型統計</li>
+                    </ul>
+                </div>
+
+                <div class="intro-section">
+                    <h3>使用提示</h3>
+                    <ul>
+                        <li>將滑鼠移到任何元素上可查看詳細提示</li>
+                        <li>點擊樹狀圖的類別可篩選球場熱區圖</li>
+                        <li>已啟用的篩選條件會顯示在球場圖上方</li>
+                        <li>使用「Reset Filters」可快速清除所有陣容篩選</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
