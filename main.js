@@ -60,6 +60,9 @@ const TEAMS = [
 // Data cache: key = "season_team"
 const dataCache = {};
 
+// Global player name cache: key = playerId, value = playerName
+const playerNameCache = new Map();
+
 // State for each segment
 const segmentState = {
     A: { shots: [], players: new Map(), teammates: new Map(), opponents: new Map(), filteredShots: [], selectedCategory: null, categoryPositions: {} },
@@ -232,6 +235,8 @@ function getTimeElapsed(period, minutes, seconds) {
 
 function binData(data, timeDurationMinutes) {
     const bins = {};
+    const totalShots = data.length;
+
     data.forEach(d => {
         const svgX = xScale(d.LOC_X);
         const svgY = yScale(d.LOC_Y);
@@ -252,7 +257,8 @@ function binData(data, timeDurationMinutes) {
     });
 
     return Object.values(bins).map(b => {
-        b.freq = timeDurationMinutes > 0 ? b.attempts / timeDurationMinutes : 0;
+        // freq is now percentage of total shots (0-1 scale)
+        b.freq = totalShots > 0 ? b.attempts / totalShots : 0;
         b.eff = b.made / b.attempts;
         return b;
     });
@@ -281,7 +287,9 @@ function drawHeatmap(containerId, data, timeRange, segment) {
 
     const duration = timeRange[1] - timeRange[0];
     const binned = binData(data, duration);
-    const sizeScale = d3.scaleSqrt().domain([0, 1.0]).range([0, binSize / 2 - 2]);
+    // freq is now 0-1 percentage, so scale domain is adjusted accordingly
+    // Max single zone is typically around 15-20% of shots
+    const sizeScale = d3.scaleSqrt().domain([0, 0.20]).range([0, binSize / 2 - 2]);
 
     // Create a map for quick lookup
     const binMap = new Map(binned.map(d => [`${d.bx},${d.by}`, d]));
@@ -338,7 +346,7 @@ function drawHeatmap(containerId, data, timeRange, segment) {
 
                 d3.select("#tooltip").style("opacity", 1)
                     .html(`<div style="font-weight:bold; color:#FFC857;">Shot Zone</div>
-                        Freq: ${cellData.freq.toFixed(2)}/min<br>Eff: ${(cellData.eff * 100).toFixed(1)}%<br>
+                        Freq: ${(cellData.freq * 100).toFixed(1)}%<br>Eff: ${(cellData.eff * 100).toFixed(1)}%<br>
                         <span style="color:#aaa;">(${cellData.made}/${cellData.attempts})</span>`)
                     .style("left", (event.pageX + 15) + "px")
                     .style("top", (event.pageY - 28) + "px");
@@ -412,8 +420,11 @@ function renderDeltaMap(containerId, data) {
     container.node().appendChild(svgNode);
 
     const group = svg.append("g").attr("class", "delta");
-    const heightScale = d3.scaleLinear().domain([0, 0.5]).range([10, binSize * 0.5]);
-    const widthScale = d3.scaleLinear().domain([0, 2]).range([10, binSize * 0.5]);
+    // Adjusted scales for percentage-based freq values (0-1 scale instead of per-minute)
+    // deltaFreq range is typically -0.1 to 0.1 (10% difference)
+    const heightScale = d3.scaleLinear().domain([0, 0.10]).range([10, binSize * 1.5]);
+    // avgFreq range is typically 0 to 0.15 (15% of shots)
+    const widthScale = d3.scaleLinear().domain([0, 0.15]).range([10, binSize * 1.5]);
 
     const arrowPath = (w, h, dir) => {
         const sign = dir > 0 ? 1 : -1;
@@ -496,8 +507,13 @@ function renderDeltaMap(containerId, data) {
         });
 }
 
-// Load data for a specific season + team
+// Load data for a specific season + team (or all teams if teamCode is empty)
 async function loadTeamData(season, teamCode) {
+    // If teamCode is empty, load all teams' data for league-wide analysis
+    if (!teamCode) {
+        return loadAllTeamsData(season);
+    }
+
     const cacheKey = `${season}_${teamCode}`;
     if (dataCache[cacheKey]) return dataCache[cacheKey];
 
@@ -506,6 +522,10 @@ async function loadTeamData(season, teamCode) {
         const data = await d3.json(url);
         data.forEach(d => {
             d.timeElapsed = getTimeElapsed(d.PERIOD, d.MINUTES_REMAINING, d.SECONDS_REMAINING);
+            // Cache player names
+            if (d.PLAYER_ID && d.PLAYER_NAME) {
+                playerNameCache.set(d.PLAYER_ID, d.PLAYER_NAME);
+            }
         });
         dataCache[cacheKey] = data;
         return data;
@@ -513,6 +533,33 @@ async function loadTeamData(season, teamCode) {
         console.warn(`Failed to load ${url}`);
         return [];
     }
+}
+
+// Load all teams' data for a season (league-wide analysis)
+async function loadAllTeamsData(season) {
+    const cacheKey = `${season}_ALL`;
+    if (dataCache[cacheKey]) return dataCache[cacheKey];
+
+    console.log(`Loading all teams data for ${season}...`);
+    const allData = [];
+
+    // Load data for each team in parallel
+    const promises = TEAMS.map(async team => {
+        try {
+            const teamData = await loadTeamData(season, team.code);
+            return teamData;
+        } catch (e) {
+            console.warn(`Failed to load ${team.code} data`);
+            return [];
+        }
+    });
+
+    const results = await Promise.all(promises);
+    results.forEach(teamData => allData.push(...teamData));
+
+    dataCache[cacheKey] = allData;
+    console.log(`Loaded ${allData.length} shots for ${season} league-wide analysis`);
+    return allData;
 }
 
 function extractPlayers(shots) {
@@ -525,46 +572,173 @@ function extractPlayers(shots) {
     return players;
 }
 
-function extractTeammatesAndOpponents(shots, playerId) {
+function extractTeammatesAndOpponents(shots, playerId, season) {
     const teammates = new Map();
     const opponents = new Map();
+    const opponentTeamCodes = new Set();
     const playerShots = shots.filter(s => s.PLAYER_ID === playerId);
 
     playerShots.forEach(shot => {
         if (shot.teammates_on_court) {
             shot.teammates_on_court.forEach(tid => {
                 if (tid !== playerId) {
-                    const tShot = shots.find(s => s.PLAYER_ID === tid);
-                    teammates.set(tid, tShot ? tShot.PLAYER_NAME : `Player ${tid}`);
+                    // First check the global cache
+                    if (playerNameCache.has(tid)) {
+                        teammates.set(tid, playerNameCache.get(tid));
+                    } else {
+                        const tShot = shots.find(s => s.PLAYER_ID === tid);
+                        const name = tShot ? tShot.PLAYER_NAME : `Player ${tid}`;
+                        teammates.set(tid, name);
+                        if (tShot) playerNameCache.set(tid, name);
+                    }
                 }
             });
         }
         if (shot.opponents_on_court) {
             shot.opponents_on_court.forEach(oid => {
-                const oShot = shots.find(s => s.PLAYER_ID === oid);
-                opponents.set(oid, oShot ? oShot.PLAYER_NAME : `Player ${oid}`);
+                // Check the global cache first
+                if (playerNameCache.has(oid)) {
+                    opponents.set(oid, playerNameCache.get(oid));
+                } else {
+                    // Will be resolved later, use placeholder for now
+                    opponents.set(oid, `Player ${oid}`);
+                }
             });
+
+            // Track opponent team codes to fetch their data
+            const shooterTeamCode = TEAMS.find(t => t.name === shot.TEAM_NAME)?.code;
+            if (shooterTeamCode === shot.HTM && shot.VTM) {
+                opponentTeamCodes.add(shot.VTM);
+            } else if (shot.HTM) {
+                opponentTeamCodes.add(shot.HTM);
+            }
         }
     });
-    return { teammates, opponents };
+
+    return { teammates, opponents, opponentTeamCodes };
 }
 
-function populateSelect(selectId, items, includeAny = false) {
+// Async function to resolve opponent player names
+async function resolveOpponentNames(opponents, opponentTeamCodes, season) {
+    // Check if we have any unresolved names
+    const unresolvedIds = [...opponents.entries()]
+        .filter(([id, name]) => name.startsWith('Player '))
+        .map(([id]) => id);
+
+    if (unresolvedIds.length === 0) return opponents;
+
+    // Load opponent team data to get player names
+    for (const teamCode of opponentTeamCodes) {
+        if (unresolvedIds.length === 0) break;
+
+        try {
+            const oppData = await loadTeamData(season, teamCode);
+            oppData.forEach(shot => {
+                if (shot.PLAYER_ID && shot.PLAYER_NAME) {
+                    playerNameCache.set(shot.PLAYER_ID, shot.PLAYER_NAME);
+                    if (opponents.has(shot.PLAYER_ID)) {
+                        opponents.set(shot.PLAYER_ID, shot.PLAYER_NAME);
+                    }
+                }
+            });
+        } catch (e) {
+            console.warn(`Failed to load opponent team ${teamCode} data`);
+        }
+    }
+
+    // Update any remaining unresolved names from cache
+    opponents.forEach((name, id) => {
+        if (name.startsWith('Player ') && playerNameCache.has(id)) {
+            opponents.set(id, playerNameCache.get(id));
+        }
+    });
+
+    return opponents;
+}
+
+// Extract unique opponent teams from shots data
+function extractOpponentTeams(shots, selectedTeamCode) {
+    const opponentTeams = new Map();
+
+    shots.forEach(shot => {
+        // Determine opponent team based on HTM (Home Team) and VTM (Visitor Team)
+        // If selected team is home team (HTM), opponent is visitor (VTM), and vice versa
+        let opponentCode = null;
+        if (shot.HTM && shot.VTM) {
+            // Check which team matches our selected team
+            if (shot.HTM === selectedTeamCode) {
+                opponentCode = shot.VTM;
+            } else if (shot.VTM === selectedTeamCode) {
+                opponentCode = shot.HTM;
+            } else {
+                // For league-wide analysis, just extract all opponent teams
+                opponentCode = shot.HTM === shot.TEAM_NAME?.split(' ').pop() ? shot.VTM : shot.HTM;
+            }
+        }
+
+        if (opponentCode && !opponentTeams.has(opponentCode)) {
+            // Find the full team name from TEAMS array
+            const teamInfo = TEAMS.find(t => t.code === opponentCode);
+            opponentTeams.set(opponentCode, teamInfo ? teamInfo.name : opponentCode);
+        }
+    });
+
+    return opponentTeams;
+}
+
+function populateSelect(selectId, items, includeAny = false, anyText = "-- Any --") {
     const select = d3.select(`#${selectId}`);
     select.selectAll("option").remove();
-    if (includeAny) select.append("option").attr("value", "").text("-- Any --");
+    if (includeAny) select.append("option").attr("value", "").text(anyText);
     const sorted = Array.from(items.entries()).sort((a, b) => a[1].localeCompare(b[1]));
     select.selectAll("option.item").data(sorted).enter().append("option")
         .attr("class", "item").attr("value", d => d[0]).text(d => d[1]);
 }
 
-function filterShots(shots, playerId, timeRange, teammateOn, teammateOff, opponentOn, opponentOff) {
-    let filtered = shots.filter(d => d.PLAYER_ID === playerId);
+// Sync on/off court dropdowns to prevent selecting the same player in both
+function syncOnOffDropdowns(sourceId, targetId) {
+    const sourceSelect = d3.select(`#${sourceId}`);
+    const targetSelect = d3.select(`#${targetId}`);
+    const selectedValue = sourceSelect.property("value");
+
+    // Enable all options in target first
+    targetSelect.selectAll("option").property("disabled", false);
+
+    // Disable the selected option in the target dropdown (if not empty)
+    if (selectedValue) {
+        targetSelect.selectAll("option")
+            .filter(function () { return this.value === selectedValue; })
+            .property("disabled", true);
+
+        // If target has the same value selected, reset it to empty
+        if (targetSelect.property("value") === selectedValue) {
+            targetSelect.property("value", "");
+        }
+    }
+}
+
+function filterShots(shots, playerId, timeRange, teammateOn, teammateOff, opponentOn, opponentOff, opponentTeam) {
+    // If playerId is falsy (empty/NaN), include all players (team-wide or league-wide analysis)
+    let filtered = playerId ? shots.filter(d => d.PLAYER_ID === playerId) : shots;
     filtered = filtered.filter(d => d.timeElapsed >= timeRange[0] && d.timeElapsed < timeRange[1]);
     if (teammateOn) filtered = filtered.filter(d => d.teammates_on_court?.includes(parseInt(teammateOn)));
     if (teammateOff) filtered = filtered.filter(d => !d.teammates_on_court?.includes(parseInt(teammateOff)));
     if (opponentOn) filtered = filtered.filter(d => d.opponents_on_court?.includes(parseInt(opponentOn)));
     if (opponentOff) filtered = filtered.filter(d => !d.opponents_on_court?.includes(parseInt(opponentOff)));
+
+    // Filter by opponent team
+    if (opponentTeam) {
+        filtered = filtered.filter(d => {
+            // Check if opponent team matches HTM or VTM (whichever is not the shooter's team)
+            const shooterTeamCode = TEAMS.find(t => t.name === d.TEAM_NAME)?.code;
+            if (shooterTeamCode === d.HTM) {
+                return d.VTM === opponentTeam;
+            } else {
+                return d.HTM === opponentTeam;
+            }
+        });
+    }
+
     return filtered;
 }
 
@@ -1304,21 +1478,83 @@ function updateStatsTable(segment, data) {
     });
 }
 
+// Update filter display to show active filters above the court map
+function updateFilterDisplay(segment) {
+    const container = d3.select(`#filter-display-${segment.toLowerCase()}`);
+    container.html(""); // Clear existing badges
+
+    const filters = [];
+
+    // Check each filter
+    const teammateOn = d3.select(`#teammateOn${segment}`);
+    const teammateOnValue = teammateOn.property("value");
+    if (teammateOnValue) {
+        const name = teammateOn.node()?.selectedOptions[0]?.text || teammateOnValue;
+        filters.push({ label: "With", value: name });
+    }
+
+    const teammateOff = d3.select(`#teammateOff${segment}`);
+    const teammateOffValue = teammateOff.property("value");
+    if (teammateOffValue) {
+        const name = teammateOff.node()?.selectedOptions[0]?.text || teammateOffValue;
+        filters.push({ label: "W/o", value: name });
+    }
+
+    const opponentOn = d3.select(`#opponentOn${segment}`);
+    const opponentOnValue = opponentOn.property("value");
+    if (opponentOnValue) {
+        const name = opponentOn.node()?.selectedOptions[0]?.text || opponentOnValue;
+        filters.push({ label: "vs", value: name });
+    }
+
+    const opponentOff = d3.select(`#opponentOff${segment}`);
+    const opponentOffValue = opponentOff.property("value");
+    if (opponentOffValue) {
+        const name = opponentOff.node()?.selectedOptions[0]?.text || opponentOffValue;
+        filters.push({ label: "No", value: name });
+    }
+
+    const opponentTeam = d3.select(`#opponentTeam${segment}`);
+    const opponentTeamValue = opponentTeam.property("value");
+    if (opponentTeamValue) {
+        const name = opponentTeam.node()?.selectedOptions[0]?.text || opponentTeamValue;
+        filters.push({ label: "@", value: name });
+    }
+
+    // Create badges for each active filter
+    filters.forEach(f => {
+        container.append("span")
+            .attr("class", "filter-badge")
+            .html(`<span class="label">${f.label}</span><span class="value">${f.value}</span>`);
+    });
+}
+
 function updateSegmentTitle(segment) {
     const season = d3.select(`#seasonSelect${segment}`).property("value");
     const teamCode = d3.select(`#teamSelect${segment}`).property("value");
     const playerSelect = d3.select(`#playerSelect${segment}`);
-    const playerName = playerSelect.node()?.selectedOptions[0]?.text || "";
+    const playerText = playerSelect.node()?.selectedOptions[0]?.text || "";
 
-    // Find team name from code
-    const team = TEAMS.find(t => t.code === teamCode);
-    const teamName = team ? team.code : teamCode;
+    // Determine team display name
+    let teamDisplay;
+    if (!teamCode) {
+        teamDisplay = "League"; // All Teams
+    } else {
+        const team = TEAMS.find(t => t.code === teamCode);
+        teamDisplay = team ? team.code : teamCode;
+    }
+
+    // Determine player display name
+    let playerDisplay;
+    if (playerText === "-- All Players --" || !playerText) {
+        playerDisplay = "All Players";
+    } else {
+        playerDisplay = playerText;
+    }
 
     let treemapInfo = "-- Select --";
-    if (season && teamName && playerName) {
-        treemapInfo = `${season} ${teamName} - ${playerName}`;
-    } else if (season && teamName) {
-        treemapInfo = `${season} ${teamName}`;
+    if (season) {
+        treemapInfo = `${season} ${teamDisplay} - ${playerDisplay}`;
     }
 
     // Only update treemap info, not the h3 title
@@ -1328,17 +1564,19 @@ function updateSegmentTitle(segment) {
 async function updateSegmentA() {
     const season = d3.select("#seasonSelectA").property("value");
     const team = d3.select("#teamSelectA").property("value");
-    const playerId = parseInt(d3.select("#playerSelectA").property("value"));
+    const playerIdStr = d3.select("#playerSelectA").property("value");
+    const playerId = playerIdStr ? parseInt(playerIdStr) : null; // null means "Any" player
     const rangeA = sliderA ? sliderA.value() : [0, 24];
 
-    if (!season || !team || !playerId) return;
+    if (!season) return; // Only season is required; team and player can be "Any"
 
-    const shots = await loadTeamData(season, team);
+    const shots = await loadTeamData(season, team); // team can be empty for league-wide
     const filtered = filterShots(shots, playerId, rangeA,
         d3.select("#teammateOnA").property("value"),
         d3.select("#teammateOffA").property("value"),
         d3.select("#opponentOnA").property("value"),
-        d3.select("#opponentOffA").property("value"));
+        d3.select("#opponentOffA").property("value"),
+        d3.select("#opponentTeamA").property("value"));
 
     segmentState.A.filteredShots = filtered;
     segmentState.A.selectedCategory = null; // Reset category selection when data changes
@@ -1347,6 +1585,7 @@ async function updateSegmentA() {
     drawTreemap("#treemap-a", filtered, 'A');
     updateOverallStats('A', filtered);
     updateStatsTable('A', filtered);
+    updateFilterDisplay('A');
     updateSegmentTitle('A');
     updateDelta();
 }
@@ -1354,17 +1593,19 @@ async function updateSegmentA() {
 async function updateSegmentB() {
     const season = d3.select("#seasonSelectB").property("value");
     const team = d3.select("#teamSelectB").property("value");
-    const playerId = parseInt(d3.select("#playerSelectB").property("value"));
+    const playerIdStr = d3.select("#playerSelectB").property("value");
+    const playerId = playerIdStr ? parseInt(playerIdStr) : null; // null means "Any" player
     const rangeB = sliderB ? sliderB.value() : [24, 48];
 
-    if (!season || !team || !playerId) return;
+    if (!season) return; // Only season is required; team and player can be "Any"
 
-    const shots = await loadTeamData(season, team);
+    const shots = await loadTeamData(season, team); // team can be empty for league-wide
     const filtered = filterShots(shots, playerId, rangeB,
         d3.select("#teammateOnB").property("value"),
         d3.select("#teammateOffB").property("value"),
         d3.select("#opponentOnB").property("value"),
-        d3.select("#opponentOffB").property("value"));
+        d3.select("#opponentOffB").property("value"),
+        d3.select("#opponentTeamB").property("value"));
 
     segmentState.B.filteredShots = filtered;
     segmentState.B.selectedCategory = null; // Reset category selection when data changes
@@ -1373,6 +1614,7 @@ async function updateSegmentB() {
     drawTreemap("#treemap-b", filtered, 'B');
     updateOverallStats('B', filtered);
     updateStatsTable('B', filtered);
+    updateFilterDisplay('B');
     updateSegmentTitle('B');
     updateDelta();
 }
@@ -1380,15 +1622,18 @@ async function updateSegmentB() {
 async function updateDelta() {
     const seasonA = d3.select("#seasonSelectA").property("value");
     const teamA = d3.select("#teamSelectA").property("value");
-    const playerIdA = parseInt(d3.select("#playerSelectA").property("value"));
+    const playerIdStrA = d3.select("#playerSelectA").property("value");
+    const playerIdA = playerIdStrA ? parseInt(playerIdStrA) : null;
     const rangeA = sliderA ? sliderA.value() : [0, 24];
 
     const seasonB = d3.select("#seasonSelectB").property("value");
     const teamB = d3.select("#teamSelectB").property("value");
-    const playerIdB = parseInt(d3.select("#playerSelectB").property("value"));
+    const playerIdStrB = d3.select("#playerSelectB").property("value");
+    const playerIdB = playerIdStrB ? parseInt(playerIdStrB) : null;
     const rangeB = sliderB ? sliderB.value() : [24, 48];
 
-    if (!seasonA || !teamA || !playerIdA || !seasonB || !teamB || !playerIdB) return;
+    // Only season is required for delta comparison
+    if (!seasonA || !seasonB) return;
 
     const shotsA = await loadTeamData(seasonA, teamA);
     const shotsB = await loadTeamData(seasonB, teamB);
@@ -1397,13 +1642,15 @@ async function updateDelta() {
         d3.select("#teammateOnA").property("value"),
         d3.select("#teammateOffA").property("value"),
         d3.select("#opponentOnA").property("value"),
-        d3.select("#opponentOffA").property("value"));
+        d3.select("#opponentOffA").property("value"),
+        d3.select("#opponentTeamA").property("value"));
 
     const filteredB = filterShots(shotsB, playerIdB, rangeB,
         d3.select("#teammateOnB").property("value"),
         d3.select("#teammateOffB").property("value"),
         d3.select("#opponentOnB").property("value"),
-        d3.select("#opponentOffB").property("value"));
+        d3.select("#opponentOffB").property("value"),
+        d3.select("#opponentTeamB").property("value"));
 
     // Apply category filter if selected
     let deltaA = filteredA;
@@ -1424,42 +1671,113 @@ async function onTeamChange(segment) {
     const season = d3.select(`#seasonSelect${segment}`).property("value");
     const team = d3.select(`#teamSelect${segment}`).property("value");
 
-    if (!season || !team) return;
+    if (!season) return; // Only season is required
 
-    const shots = await loadTeamData(season, team);
+    const shots = await loadTeamData(season, team); // team can be empty for league-wide
     const players = extractPlayers(shots);
     segmentState[segment].shots = shots;
     segmentState[segment].players = players;
 
-    populateSelect(`playerSelect${segment}`, players);
+    // Add "Any" option to player select for team-wide analysis
+    populateSelect(`playerSelect${segment}`, players, true, "-- All Players --");
 
-    // Set default player to LeBron James if available
+    // Set default player to LeBron James if available (only for LAL team)
     const LEBRON_ID = 2544;
     if (team === "LAL" && players.has(LEBRON_ID)) {
         d3.select(`#playerSelect${segment}`).property("value", LEBRON_ID);
     }
 
-    // Clear filters
+    // Clear player-specific filters
     ["teammateOn", "teammateOff", "opponentOn", "opponentOff"].forEach(prefix => {
         const select = d3.select(`#${prefix}${segment}`);
         select.selectAll("option").remove();
         select.append("option").attr("value", "").text("-- Any --");
     });
 
-    if (players.size > 0) await onPlayerChange(segment);
+    // Populate opponent team dropdown
+    const opponentTeams = extractOpponentTeams(shots, team);
+    populateSelect(`opponentTeam${segment}`, opponentTeams, true, "-- Any --");
+
+    await onPlayerChange(segment);
 }
 
 async function onPlayerChange(segment) {
-    const playerId = parseInt(d3.select(`#playerSelect${segment}`).property("value"));
-    if (!playerId) return;
+    const playerIdStr = d3.select(`#playerSelect${segment}`).property("value");
+    const playerId = playerIdStr ? parseInt(playerIdStr) : null;
+    const season = d3.select(`#seasonSelect${segment}`).property("value");
 
     const shots = segmentState[segment].shots;
-    const { teammates, opponents } = extractTeammatesAndOpponents(shots, playerId);
 
-    populateSelect(`teammateOn${segment}`, teammates, true);
-    populateSelect(`teammateOff${segment}`, teammates, true);
-    populateSelect(`opponentOn${segment}`, opponents, true);
-    populateSelect(`opponentOff${segment}`, opponents, true);
+    // Only populate teammate/opponent filters if a specific player is selected
+    if (playerId) {
+        const { teammates, opponents, opponentTeamCodes } = extractTeammatesAndOpponents(shots, playerId, season);
+
+        // Resolve opponent names by loading opponent team data
+        await resolveOpponentNames(opponents, opponentTeamCodes, season);
+
+        // Store all opponents for later filtering
+        segmentState[segment].allOpponents = opponents;
+        segmentState[segment].opponentTeamCodes = opponentTeamCodes;
+
+        populateSelect(`teammateOn${segment}`, teammates, true);
+        populateSelect(`teammateOff${segment}`, teammates, true);
+        populateSelect(`opponentOn${segment}`, opponents, true);
+        populateSelect(`opponentOff${segment}`, opponents, true);
+    } else {
+        // Clear teammate/opponent filters when "All Players" is selected
+        ["teammateOn", "teammateOff", "opponentOn", "opponentOff"].forEach(prefix => {
+            const select = d3.select(`#${prefix}${segment}`);
+            select.selectAll("option").remove();
+            select.append("option").attr("value", "").text("-- Any --");
+        });
+    }
+
+    if (segment === 'A') await updateSegmentA();
+    else await updateSegmentB();
+}
+
+// Handle opponent team change - filter opponent on/off court dropdowns
+async function onOpponentTeamChange(segment) {
+    const selectedOpponentTeam = d3.select(`#opponentTeam${segment}`).property("value");
+    const season = d3.select(`#seasonSelect${segment}`).property("value");
+    const playerIdStr = d3.select(`#playerSelect${segment}`).property("value");
+    const playerId = playerIdStr ? parseInt(playerIdStr) : null;
+
+    if (!playerId) {
+        // No player selected, just update the segment
+        if (segment === 'A') await updateSegmentA();
+        else await updateSegmentB();
+        return;
+    }
+
+    const shots = segmentState[segment].shots;
+    const { teammates, opponents, opponentTeamCodes } = extractTeammatesAndOpponents(shots, playerId, season);
+
+    // Resolve opponent names
+    await resolveOpponentNames(opponents, opponentTeamCodes, season);
+
+    if (selectedOpponentTeam) {
+        // Filter opponents to only include players from the selected opponent team
+        const filteredOpponents = new Map();
+
+        // Load the selected opponent team's data to get their player roster
+        const oppTeamData = await loadTeamData(season, selectedOpponentTeam);
+        const oppTeamPlayerIds = new Set(oppTeamData.map(s => s.PLAYER_ID));
+
+        // Filter the opponents map to only include players from this team
+        opponents.forEach((name, id) => {
+            if (oppTeamPlayerIds.has(id)) {
+                filteredOpponents.set(id, name);
+            }
+        });
+
+        populateSelect(`opponentOn${segment}`, filteredOpponents, true);
+        populateSelect(`opponentOff${segment}`, filteredOpponents, true);
+    } else {
+        // No opponent team selected, show all opponents
+        populateSelect(`opponentOn${segment}`, opponents, true);
+        populateSelect(`opponentOff${segment}`, opponents, true);
+    }
 
     if (segment === 'A') await updateSegmentA();
     else await updateSegmentB();
@@ -1474,6 +1792,10 @@ d3.xml("court.svg").then(function (xml) {
         d3.select("#seasonSelectA").append("option").attr("value", season).text(season);
         d3.select("#seasonSelectB").append("option").attr("value", season).text(season);
     });
+
+    // Add "All Teams" option at the top for league-wide analysis
+    d3.select("#teamSelectA").append("option").attr("value", "").text("-- All Teams (League) --");
+    d3.select("#teamSelectB").append("option").attr("value", "").text("-- All Teams (League) --");
 
     TEAMS.forEach(team => {
         d3.select("#teamSelectA").append("option").attr("value", team.code).text(team.name);
@@ -1508,11 +1830,76 @@ d3.xml("court.svg").then(function (xml) {
     d3.select("#playerSelectA").on("change", () => onPlayerChange('A'));
     d3.select("#playerSelectB").on("change", () => onPlayerChange('B'));
 
-    ["teammateOnA", "teammateOffA", "opponentOnA", "opponentOffA"].forEach(id => {
-        d3.select(`#${id}`).on("change", updateSegmentA);
+    // Teammate/Opponent on/off court change handlers with sync
+    d3.select("#teammateOnA").on("change", function () {
+        syncOnOffDropdowns("teammateOnA", "teammateOffA");
+        updateSegmentA();
     });
-    ["teammateOnB", "teammateOffB", "opponentOnB", "opponentOffB"].forEach(id => {
-        d3.select(`#${id}`).on("change", updateSegmentB);
+    d3.select("#teammateOffA").on("change", function () {
+        syncOnOffDropdowns("teammateOffA", "teammateOnA");
+        updateSegmentA();
+    });
+    d3.select("#opponentOnA").on("change", function () {
+        syncOnOffDropdowns("opponentOnA", "opponentOffA");
+        updateSegmentA();
+    });
+    d3.select("#opponentOffA").on("change", function () {
+        syncOnOffDropdowns("opponentOffA", "opponentOnA");
+        updateSegmentA();
+    });
+
+    d3.select("#teammateOnB").on("change", function () {
+        syncOnOffDropdowns("teammateOnB", "teammateOffB");
+        updateSegmentB();
+    });
+    d3.select("#teammateOffB").on("change", function () {
+        syncOnOffDropdowns("teammateOffB", "teammateOnB");
+        updateSegmentB();
+    });
+    d3.select("#opponentOnB").on("change", function () {
+        syncOnOffDropdowns("opponentOnB", "opponentOffB");
+        updateSegmentB();
+    });
+    d3.select("#opponentOffB").on("change", function () {
+        syncOnOffDropdowns("opponentOffB", "opponentOnB");
+        updateSegmentB();
+    });
+
+    // Opponent team change triggers filtering of opponent player dropdowns
+    d3.select("#opponentTeamA").on("change", () => onOpponentTeamChange('A'));
+    d3.select("#opponentTeamB").on("change", () => onOpponentTeamChange('B'));
+
+    // Reset filter buttons
+    d3.select("#resetFiltersA").on("click", function () {
+        // Reset all on/off filters to empty (Any)
+        d3.select("#teammateOnA").property("value", "");
+        d3.select("#teammateOffA").property("value", "");
+        d3.select("#opponentOnA").property("value", "");
+        d3.select("#opponentOffA").property("value", "");
+        d3.select("#opponentTeamA").property("value", "");
+
+        // Re-enable all options
+        ["teammateOnA", "teammateOffA", "opponentOnA", "opponentOffA"].forEach(id => {
+            d3.select(`#${id}`).selectAll("option").property("disabled", false);
+        });
+
+        updateSegmentA();
+    });
+
+    d3.select("#resetFiltersB").on("click", function () {
+        // Reset all on/off filters to empty (Any)
+        d3.select("#teammateOnB").property("value", "");
+        d3.select("#teammateOffB").property("value", "");
+        d3.select("#opponentOnB").property("value", "");
+        d3.select("#opponentOffB").property("value", "");
+        d3.select("#opponentTeamB").property("value", "");
+
+        // Re-enable all options
+        ["teammateOnB", "teammateOffB", "opponentOnB", "opponentOffB"].forEach(id => {
+            d3.select(`#${id}`).selectAll("option").property("disabled", false);
+        });
+
+        updateSegmentB();
     });
 
     sliderA.on('onchange', updateSegmentA);

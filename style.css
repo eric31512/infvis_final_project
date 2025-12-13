@@ -344,6 +344,42 @@ button#reset-btn:hover {
     min-width: 250px;
 }
 
+/* Active Filter Display */
+.filter-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px;
+    min-height: 24px;
+    font-size: 0.7rem;
+}
+
+.filter-display:empty {
+    display: none;
+}
+
+.filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    background-color: rgba(255, 200, 87, 0.15);
+    border: 1px solid rgba(255, 200, 87, 0.3);
+    border-radius: 3px;
+    color: #FFC857;
+    white-space: nowrap;
+}
+
+.filter-badge .label {
+    color: #888;
+    font-size: 0.65rem;
+}
+
+.filter-badge .value {
+    color: #FFC857;
+    font-weight: 600;
+}
+
 /* Stats Summary Bar */
 .stats-summary {
     display: flex;
@@ -547,6 +583,31 @@ button#reset-btn:hover {
     color: white;
     border: 1px solid #444;
     border-radius: 4px;
+}
+
+/* Filter Reset Button */
+.filter-reset-row {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #444;
+}
+
+.filter-reset-btn {
+    width: 100%;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background-color: #444;
+    color: #FFC857;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.filter-reset-btn:hover {
+    background-color: #555;
+    border-color: #FFC857;
 }
 
 /* Period Quick Select */
