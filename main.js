@@ -111,7 +111,8 @@ let sliderA = null;
 let sliderB = null;
 
 // Linked highlighting functions
-function highlightShotType(segment, shotType) {
+// isCategory: true = highlight all shots in this category, false = only exact ACTION_TYPE match
+function highlightShotType(segment, shotType, isCategory = false) {
     const containerId = `#heatmap-${segment.toLowerCase()}`;
     const svg = d3.select(containerId).select("svg");
     if (!svg.node()) return;
@@ -123,8 +124,14 @@ function highlightShotType(segment, shotType) {
 
     const filteredShots = segmentState[segment].filteredShots;
     const matchingShots = filteredShots.filter(d => {
-        const category = getShotCategory(d.ACTION_TYPE);
-        return d.ACTION_TYPE === shotType || category === shotType;
+        if (isCategory) {
+            // Match all shots in this category
+            const category = getShotCategory(d.ACTION_TYPE);
+            return category === shotType;
+        } else {
+            // Match only exact ACTION_TYPE
+            return d.ACTION_TYPE === shotType;
+        }
     });
 
     const highlightGroup = svg.append("g").attr("class", "highlight-layer");
@@ -918,7 +925,7 @@ function drawTreemap(containerId, data, segment) {
         .attr("cursor", "pointer")
         .text(d => d.data.name)
         .on("mouseover", (event, d) => {
-            if (segment) highlightShotType(segment, d.data.name);
+            if (segment) highlightShotType(segment, d.data.name, true); // Category-level highlight
         })
         .on("mouseout", () => {
             if (segment) clearHighlight(segment);
@@ -989,8 +996,8 @@ function drawTreemap(containerId, data, segment) {
             .style("left", (event.pageX + 15) + "px")
             .style("top", (event.pageY - 28) + "px");
 
-        // Linked highlighting
-        if (segment) highlightShotType(segment, d.data.name);
+        // Linked highlighting (individual shot type, not category)
+        if (segment) highlightShotType(segment, d.data.name, false);
     }).on("mouseout", () => {
         d3.select("#tooltip").style("opacity", 0);
         if (segment) clearHighlight(segment);
@@ -1312,7 +1319,7 @@ function drawTreemapWithSelection(containerId, data, segment, selectedCategory) 
                             EFG: ${(leaf.data.efg * 100).toFixed(1)}%`)
                         .style("left", (event.pageX + 15) + "px")
                         .style("top", (event.pageY - 28) + "px");
-                    if (segment) highlightShotType(segment, leaf.data.name);
+                    if (segment) highlightShotType(segment, leaf.data.name, false);
                 })
                 .on("mouseout", () => {
                     rect.attr("stroke", "#222").attr("stroke-width", 0.5);
@@ -1417,7 +1424,7 @@ function drawTreemapWithSelection(containerId, data, segment, selectedCategory) 
                                 EFG: ${(leaf.data.efg * 100).toFixed(1)}%`)
                             .style("left", (event.pageX + 15) + "px")
                             .style("top", (event.pageY - 28) + "px");
-                        if (segment) highlightShotType(segment, leaf.data.name);
+                        if (segment) highlightShotType(segment, leaf.data.name, false);
                     })
                     .on("mouseout", () => {
                         d3.select("#tooltip").style("opacity", 0);
@@ -1470,7 +1477,7 @@ function updateStatsTable(segment, data) {
         // Linked highlighting
         row.on("mouseover", () => {
             row.style("background-color", "rgba(255, 200, 87, 0.2)");
-            highlightShotType(segment, st.name);
+            highlightShotType(segment, st.name, false);
         }).on("mouseout", () => {
             row.style("background-color", null);
             clearHighlight(segment);
